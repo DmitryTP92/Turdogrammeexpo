@@ -27,10 +27,10 @@ export async function registerForPushNotificationsAsync() {
   }
 
   if (Platform.OS === 'android') {
-    Notifications.setNotificationChannelAsync('default', {
+    await Notifications.setNotificationChannelAsync('default', {
       name: 'default',
       importance: Notifications.AndroidImportance.MAX,
-      sound: 'default',
+      sound: 'ringtone.mp3', // 🔥 Set your custom sound
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#FF231F7C',
     });

@@ -27,9 +27,10 @@ import {
   saveUser,
   sendTurd,
   sendTurdInApp,
+  saveToMemoryBank,
   savePushToken
 } from "./firestoreHelpers";
-import { formatPhoneNumber } from "./firestoreHelpers";
+
 import { StripeProvider } from "@stripe/stripe-react-native";
 import Sound from 'react-native-sound';
 import * as Speech from 'expo-speech';
@@ -38,6 +39,7 @@ import * as Speech from 'expo-speech';
 import { navigationRef } from "./navigationRef";
 import { registerForPushNotificationsAsync } from "./notifications";
 import * as Notifications from 'expo-notifications';
+
 
 
 // Stripe publishable key
@@ -426,6 +428,7 @@ const sendTurdViaWhatsApp = async (phoneNumber, selectedGif, message) => {
   Linking.openURL(whatsappURL);
 };
 
+import { formatPhoneNumber } from "./firestoreHelpers"; // ✅ Import at the top
 
 const SendScreen = ({ navigation, route }) => {
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -503,26 +506,36 @@ const SendScreen = ({ navigation, route }) => {
       alert(i18n.t("send.not_enough"));
       return;
     }
-
     try {
       if (deliveryMethod === "inApp") {
         const formattedRecipient = phoneNumber.replace(/[^0-9+]/g, '');
         console.log("🟢 Sending in-app to:", formattedRecipient);
         console.log("🟡 GIF to send:", gifToSend);
-        const result = await sendTurdInApp(userId, formattedRecipient, gifToSend, message);
+        const senderPhone = await AsyncStorage.getItem("userPhone");
+        const result = await sendTurdInApp(senderPhone, formattedRecipient, gifToSend, message);
         console.log("🟣 In-app result:", result);
-
+    
         if (!result.success) throw new Error(result.message || "Failed to send turd.");
+    
+      
+        if (!isUnlimited) {
+          updateBalance(-totalCost);
+      
+          // 🔄 Refresh Firestore value after deduction to fix UI
+          const userRef = doc(db, "users", userId);
+          const snap = await getDoc(userRef);
+          if (snap.exists()) {
+            const data = snap.data();
+            updateBalance(0); // force re-render
+            setTimeout(() => updateBalance(data.turdCoins || 0), 300); // correct balance
+          }
+        }
       } else {
         console.log("🟢 Sending via WhatsApp to:", phoneNumber);
         await sendTurdViaWhatsApp(phoneNumber, selectedGif, message);
+        if (!isUnlimited) updateBalance(-totalCost);
       }
-
-      // 💩 Always deduct coins here after successful send (unless unlimited)
-      if (!isUnlimited) {
-        updateBalance(-totalCost);
-      }
-
+      
       const randomMessage = TURD_SENT_MESSAGES[Math.floor(Math.random() * TURD_SENT_MESSAGES.length)];
       navigation.navigate("SentScreen", { selectedGif: gifToSend, message });
     } catch (error) {
@@ -683,18 +696,22 @@ const GiftScreen = ({ navigation }) => {
         body: JSON.stringify({ senderPhone, recipientPhone: recipientNumber, amount }),
       });
 
-      if (response.ok) {
-        // 👇 Instead of fetching a doc, just deduct locally
-        updateBalance(-amount); 
+      const result = await response.json(); // 🛠️ Read the real result body
 
-        alert(`🎉 Successfully gifted ${amount} TC!`);
+      if (result.success) {
+        const userDoc = await getUserData(senderPhone);
+        if (userDoc && userDoc.turdCoins !== undefined) {
+          updateBalance(userDoc.turdCoins); // ✅ Real-time update
+        }
+
+        alert(i18n.t("gift.success", { amount, defaultValue: `Successfully gifted ${amount} TC!` }));
         navigation.goBack();
       } else {
-        alert(i18n.t("gift.failed", { defaultValue: "Gift failed. Please try again." }));
+        alert(result.message || i18n.t("gift.failed", { defaultValue: "Gift failed. Please try again." }));
       }
     } catch (error) {
       console.error("Gift error:", error);
-      alert(i18n.t("common.error_generic", { defaultValue: "Something went wrong. Please try again." }));
+      alert(i18n.t("common.error_generic", { defaultValue: "You have just made someone have a turdastic day!!!." }));
     }
   };
 
@@ -738,6 +755,7 @@ const GiftScreen = ({ navigation }) => {
   );
 };
 
+
 const ReceivedTurdScreen = ({ navigation }) => {
   const [turd, setTurd] = useState(null);
   const [userPhone, setUserPhone] = useState(null);
@@ -753,6 +771,14 @@ const ReceivedTurdScreen = ({ navigation }) => {
       if (result && result.gif) {
         console.log("✅ Turd received:", result);
         setTurd(result);
+
+        const soundSetting = await AsyncStorage.getItem("soundOn");
+        const isSoundOn = soundSetting === null || soundSetting === "true";
+
+        if (isSoundOn) {
+          playTurdAlert();
+          Vibration.vibrate();
+        }
 
         const lang = i18n.locale || 'en';
         if (result.message) {
@@ -786,9 +812,16 @@ const ReceivedTurdScreen = ({ navigation }) => {
     <View style={styles.container}>
       <Text style={styles.header}>{i18n.t("received.incoming")}</Text>
       <Text style={styles.subHeader}>{i18n.t("received.anonymous")}</Text>
-      <Image source={{ uri: turd.gif }} style={styles.turdImage} resizeMode="contain" />
+
+      {/* 🖼️ Bigger Turd Image */}
+      <Image
+        source={{ uri: turd.gif }}
+        style={{ width: 250, height: 250, marginBottom: 20 }}
+        resizeMode="contain"
+      />
+
       <Text style={styles.subHeader}>{turd.message}</Text>
-  
+
       <TouchableOpacity
         style={[styles.backButton, { marginTop: 20 }]}
         onPress={() => navigation.goBack()}
@@ -796,7 +829,7 @@ const ReceivedTurdScreen = ({ navigation }) => {
         <Text style={styles.backButtonText}>{i18n.t("common.back")}</Text>
       </TouchableOpacity>
     </View>
-  );  
+  );
 };
 export default function App() {
   useEffect(() => {
