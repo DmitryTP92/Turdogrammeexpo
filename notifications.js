@@ -1,8 +1,7 @@
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
-import { Platform } from "react-native";
+import { Platform, Vibration } from "react-native";
 import { Audio } from "expo-av";
-import * as Vibration from "expo-vibration";
 
 let ringtoneSound;
 
